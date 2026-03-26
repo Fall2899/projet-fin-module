@@ -1,18 +1,19 @@
 # ============================================================
-# DataVolume — ISO pfSense CE pour VM1
-# pfSense = FreeBSD — aucun équivalent Fedora possible
+# DataVolume — Fedora Cloud 39 pour VM3
+# Fedora = même écosystème Red Hat qu'OpenShift → meilleure compatibilité
+# Format qcow2 natif KVM — démarrage plus rapide qu'un ISO
 # ============================================================
 apiVersion: cdi.kubevirt.io/v1beta1
 kind: DataVolume
 metadata:
-  name: pfsense-dv
+  name: vm3-fedora-dv
   namespace: projet-reseau
   labels:
-    app: vm1-pfsense
+    app: vm3-db
 spec:
   source:
     http:
-      url: "https://nyifiles.netgate.com/mirror/downloads/pfSense-CE-2.7.2-RELEASE-amd64.iso.gz"
+      url: "https://download.fedoraproject.org/pub/fedora/linux/releases/39/Cloud/x86_64/images/Fedora-Cloud-Base-39-1.5.x86_64.qcow2"
   pvc:
     accessModes:
       - ReadWriteOnce

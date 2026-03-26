@@ -1,0 +1,54 @@
+# ============================================================
+# ConfigMap — Script SQL injecté dans VM3 via cloud-init
+# OpenShift monte ce ConfigMap comme volume dans la VM
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vm3-init-sql
+  namespace: projet-reseau
+  labels:
+    app: vm3-db
+data:
+  init.sql: |
+    ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'RootSecure2024!';
+    DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+    DELETE FROM mysql.user WHERE User='';
+    DROP DATABASE IF EXISTS test;
+    DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+
+    CREATE DATABASE IF NOT EXISTS appdb
+      CHARACTER SET utf8mb4
+      COLLATE utf8mb4_unicode_ci;
+
+    CREATE USER IF NOT EXISTS 'webuser'@'192.168.100.10'
+      IDENTIFIED WITH mysql_native_password
+      BY 'ChangeMe2024!';
+
+    GRANT SELECT, INSERT, UPDATE, DELETE
+      ON appdb.*
+      TO 'webuser'@'192.168.100.10';
+
+    FLUSH PRIVILEGES;
+
+    USE appdb;
+
+    CREATE TABLE IF NOT EXISTS utilisateurs (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      nom        VARCHAR(100) NOT NULL,
+      email      VARCHAR(150) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB;
+
+    CREATE TABLE IF NOT EXISTS logs_acces (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      ip_source  VARCHAR(45) NOT NULL,
+      action     VARCHAR(100) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB;
+
+    INSERT INTO utilisateurs (nom, email) VALUES
+      ('Admin Projet', 'admin@projet-reseau.local'),
+      ('Test User',    'test@projet-reseau.local');
+
+    SELECT 'Base appdb initialisee avec succes' AS statut;

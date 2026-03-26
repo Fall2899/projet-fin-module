@@ -1,6 +1,8 @@
 # ============================================================
-# Service — Accès à l'interface web pfSense (port 8443)
-# Permet d'accéder à la GUI pfSense depuis l'extérieur du cluster
+# Service + Route — Interface web pfSense (VM1)
+# Accès à la GUI pfSense depuis l'extérieur du cluster
+# URL générée : https://vm1-pfsense-ui-projet-reseau.apps.<cluster>
+# Identifiants par défaut : admin / pfsense  (à changer immédiatement)
 # ============================================================
 apiVersion: v1
 kind: Service
@@ -27,7 +29,6 @@ spec:
       protocol: TCP
   type: ClusterIP
 ---
-# Route OpenShift pour exposer l'UI pfSense en HTTPS
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -42,4 +43,4 @@ spec:
   port:
     targetPort: pfsense-ui
   tls:
-    termination: passthrough       # pfSense gère son propre TLS
+    termination: passthrough

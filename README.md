@@ -1,84 +1,84 @@
-# Projet de Fin de Module — Architecture Réseau 3-Tiers Virtualisée
+# Projet Fin de Module — Architecture Réseau 3-Tiers sur OpenShift
 
-Déploiement d'une infrastructure réseau multi-VM sur **OpenShift Virtualization (KubeVirt)**,
-reproduisant un environnement d'entreprise avec segmentation LAN/DMZ sécurisée.
+## Architecture finale
 
-## Architecture
+| VM | Rôle | Technologie | OS | Réseau |
+|----|------|-------------|-----|--------|
+| VM1 | Firewall / Passerelle | VirtualMachine KubeVirt | pfSense CE 2.7 (FreeBSD) | WAN + LAN + DMZ |
+| VM2 | Serveur Web | Deployment conteneur | nginx:1.25 + node:18 (Alpine) | DMZ — 192.168.100.10 |
+| VM3 | Base de données | VirtualMachine KubeVirt | Fedora Cloud 39 + MySQL 8.0 | LAN — 192.168.10.10 |
+
+> VM2 est un conteneur (et non une VM) pour optimiser les ressources du trial OpenShift.
+> VM3 utilise Fedora Cloud 39, plus compatible avec l'écosystème Red Hat / OpenShift.
+
+## Topologie réseau
 
 ```
-Internet (NAT)
-      |
-  [ VM1 — pfSense ]  ← Passerelle / Firewall
-      |           |
-  LAN (10.0/24)  DMZ (100.0/24)
-      |               |
-  [ VM3 — MySQL ]  [ VM2 — Nginx + Node.js ]
+Internet
+    |
+[ VM1 pfSense ] — WAN (DHCP pod OpenShift)
+    |          |
+    |   LAN 192.168.10.0/24      DMZ 192.168.100.0/24
+    |          |                         |
+    |   [ VM3 MySQL ]           [ VM2 Nginx+Node.js ]
+    |   192.168.10.10           192.168.100.10
+    |          ^                         |
+    |          └─────────────────────────┘
+    |                 port 3306 (webuser uniquement)
 ```
-
-| VM | Rôle | OS | Réseau |
-|----|------|----|--------|
-| VM1 | Passerelle / Firewall | pfSense CE 2.7 | WAN + LAN + DMZ |
-| VM2 | Serveur Web | Ubuntu 22.04 LTS | DMZ (192.168.100.0/24) |
-| VM3 | Serveur Base de données | Ubuntu 22.04 LTS | LAN (192.168.10.0/24) |
 
 ## Structure du dépôt
 
 ```
 projet-fin-module/
-├── vm1-passerelle/          # VM1 pfSense — Firewall/Gateway
-│   ├── vm1-pfsense.yaml
+├── .github/workflows/deploy.yml   ← CI/CD complet GitHub Actions
+├── reseau/
+│   ├── nad-lan.yaml               ← LAN 192.168.10.0/24
+│   └── nad-dmz.yaml               ← DMZ 192.168.100.0/24
+├── vm1-passerelle/
+│   ├── vm1-pfsense.yaml           ← VirtualMachine pfSense
 │   ├── vm1-pfsense-datavolume.yaml
-│   ├── vm1-pfsense-service.yaml
-│   └── deploy-vm1.sh
-├── vm2-web/                 # VM2 Ubuntu — Nginx + Node.js
-│   ├── vm2-web.yaml
-│   ├── cloud-init-vm2.yaml
-│   ├── vm2-service.yaml
-│   └── deploy-vm2.sh
-├── vm3-db/                  # VM3 Ubuntu — MySQL
-│   ├── vm3-db.yaml
-│   ├── cloud-init-vm3.yaml
-│   ├── init.sql
-│   └── deploy-vm3.sh
-├── reseau/                  # Réseaux OpenShift
-│   ├── nad-lan.yaml
-│   ├── nad-dmz.yaml
-│   └── topology.md
-├── docs/                    # Documentation
-│   ├── guide-installation.md
-│   └── tests-validation.md
-├── .github/
-│   └── workflows/
-│       └── deploy.yml       # CI/CD GitHub Actions
+│   └── vm1-pfsense-service.yaml   ← Route vers UI pfSense
+├── vm2-web/
+│   ├── vm2-deployment.yaml        ← Deployment Nginx + Node.js
+│   └── vm2-service-route.yaml     ← Route HTTPS publique
+├── vm3-db/
+│   ├── vm3-db.yaml                ← VirtualMachine Fedora 39 + MySQL
+│   └── vm3-datavolume.yaml        ← Image Fedora Cloud qcow2
 ├── .gitignore
 └── README.md
 ```
 
-## Prérequis
-
-- Compte Red Hat avec trial OpenShift 60 jours (console.redhat.com)
-- `oc` CLI installé et configuré
-- `git` installé
-
-## Déploiement rapide
+## Déploiement
 
 ```bash
-# 1. Cloner le dépôt
+# 1. Cloner
 git clone https://github.com/TON_USERNAME/projet-fin-module.git
 cd projet-fin-module
 
-# 2. Se connecter à OpenShift
-oc login --token=<TOKEN> --server=<CLUSTER_URL>
+# 2. Connexion OpenShift
+oc login --token=<TOKEN> --server=<URL_CLUSTER>
+oc new-project projet-reseau
 
-# 3. Déployer dans l'ordre
-bash vm1-passerelle/deploy-vm1.sh
-bash vm2-web/deploy-vm2.sh
-bash vm3-db/deploy-vm3.sh
+# 3. Déployer (ou laisser GitHub Actions le faire automatiquement)
+oc apply -f reseau/
+oc apply -f vm1-passerelle/
+oc apply -f vm3-db/
+oc apply -f vm2-web/
+oc rollout status deployment/vm2-web -n projet-reseau
 ```
 
-## Parties du projet
+## Secret à modifier avant déploiement
 
-- **Partie 1** : Virtualisation — définition des VMs en YAML KubeVirt
-- **Partie 2** : Déploiement des services — pfSense, Nginx, Node.js, MySQL
-- **Partie 3** : Réseaux — LAN/DMZ via NetworkAttachmentDefinition
-- **Partie 4** : Intégration GitHub — CI/CD avec GitHub Actions
+Dans `vm2-web/vm2-deployment.yaml` et `vm3-db/vm3-db.yaml`,
+remplacer **`ChangeMe2024!`** par le même mot de passe dans les deux fichiers.
+
+## Secrets GitHub Actions à configurer
+
+Settings → Secrets and variables → Actions → New repository secret
+
+| Nom | Valeur |
+|-----|--------|
+| `OC_SERVER` | `https://api.<cluster>:6443` |
+| `OC_TOKEN` | résultat de `oc whoami -t` |
+| `OC_NAMESPACE` | `projet-reseau` |

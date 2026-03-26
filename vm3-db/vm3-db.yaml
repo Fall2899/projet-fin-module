@@ -1,0 +1,170 @@
+# ============================================================
+# VirtualMachine — VM3 Serveur Base de données
+# OS      : Fedora Cloud 39 (même écosystème Red Hat qu'OpenShift)
+# Service : MySQL 8.0
+# Réseau  : LAN uniquement — 192.168.10.10/24
+# Passerelle : 192.168.10.1 (VM1 pfSense)
+# Accès DB   : uniquement depuis VM2 (192.168.100.10) sur port 3306
+#
+# Différences Fedora vs Ubuntu prises en compte :
+#   - Gestionnaire réseau : nmcli (pas netplan)
+#   - Firewall           : firewalld (pas ufw)
+#   - Groupe sudo        : wheel (pas sudo)
+#   - Gestionnaire pkgs  : dnf (pas apt)
+#   - Paquet MySQL       : mysql-server (même nom)
+#   - Service MySQL      : mysqld (pas mysql)
+#   - Log mot de passe   : /var/log/mysqld.log (généré automatiquement)
+# ============================================================
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: vm3-db
+  namespace: projet-reseau
+  labels:
+    app: vm3-db
+    role: database
+    projet: fin-de-module
+spec:
+  running: true
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: vm3-db
+    spec:
+      domain:
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        memory:
+          guest: 2Gi
+        machine:
+          type: q35
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: "2"
+
+        devices:
+          disks:
+            - name: fedora-disk
+              bootOrder: 1
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+
+          interfaces:
+            # eth0 = LAN uniquement — jamais de connexion directe depuis Internet
+            - name: lan
+              bridge: {}
+              model: virtio
+
+      networks:
+        - name: lan
+          multus:
+            networkName: lan-network   # NAD : reseau/nad-lan.yaml
+
+      volumes:
+        - name: fedora-disk
+          dataVolume:
+            name: vm3-fedora-dv
+
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              hostname: vm3-db
+              fqdn: vm3-db.projet-reseau.local
+
+              users:
+                - name: adminuser
+                  groups: wheel          # wheel = groupe sudo sur Fedora
+                  shell: /bin/bash
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+                  lock_passwd: false
+                  # Génère le hash avec : openssl passwd -6 "TonMotDePasse"
+                  passwd: "$6$rounds=4096$randomsalt$REMPLACER_PAR_HASH_GENERE"
+
+              # dnf = gestionnaire de paquets Fedora (pas apt)
+              package_update: true
+              package_upgrade: true
+              packages:
+                - mysql-server     # MySQL 8.0 sur Fedora
+                - mysql            # client MySQL
+                - firewalld        # firewall natif Fedora (pas ufw)
+
+              write_files:
+                # Script SQL déposé dans la VM avant le premier démarrage
+                - path: /tmp/init.sql
+                  permissions: '0600'
+                  content: |
+                    -- Remplacer le mot de passe root temporaire
+                    ALTER USER 'root'@'localhost' IDENTIFIED BY 'RootSecure2024!';
+                    -- Supprimer les comptes inutiles
+                    DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost','127.0.0.1','::1');
+                    DELETE FROM mysql.user WHERE User='';
+                    DROP DATABASE IF EXISTS test;
+                    DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+                    -- Créer la base de l'application
+                    CREATE DATABASE IF NOT EXISTS appdb
+                      CHARACTER SET utf8mb4
+                      COLLATE utf8mb4_unicode_ci;
+                    -- Créer l'utilisateur webuser accessible UNIQUEMENT depuis VM2
+                    CREATE USER IF NOT EXISTS 'webuser'@'192.168.100.10'
+                      IDENTIFIED BY 'ChangeMe2024!';
+                    GRANT SELECT, INSERT, UPDATE, DELETE ON appdb.* TO 'webuser'@'192.168.100.10';
+                    FLUSH PRIVILEGES;
+                    -- Schéma de l'application
+                    USE appdb;
+                    CREATE TABLE IF NOT EXISTS utilisateurs (
+                      id         INT AUTO_INCREMENT PRIMARY KEY,
+                      nom        VARCHAR(100) NOT NULL,
+                      email      VARCHAR(150) NOT NULL UNIQUE,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB;
+                    CREATE TABLE IF NOT EXISTS logs_acces (
+                      id         INT AUTO_INCREMENT PRIMARY KEY,
+                      ip_source  VARCHAR(45) NOT NULL,
+                      action     VARCHAR(100) NOT NULL,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB;
+                    INSERT INTO utilisateurs (nom, email) VALUES
+                      ('Admin Projet','admin@projet-reseau.local'),
+                      ('Test User','test@projet-reseau.local');
+                    SELECT 'Base appdb initialisee avec succes' AS statut;
+
+              runcmd:
+                # ---- IP fixe via nmcli (NetworkManager — natif Fedora) ----
+                # Sur Fedora il n'y a PAS netplan, on utilise nmcli
+                - nmcli con mod "cloud-init eth0" ipv4.addresses 192.168.10.10/24
+                - nmcli con mod "cloud-init eth0" ipv4.gateway 192.168.10.1
+                - nmcli con mod "cloud-init eth0" ipv4.dns "8.8.8.8 1.1.1.1"
+                - nmcli con mod "cloud-init eth0" ipv4.method manual
+                - nmcli con up "cloud-init eth0"
+
+                # ---- MySQL : démarrage et initialisation ----
+                - systemctl enable mysqld
+                - systemctl start mysqld
+                # Attendre que mysqld soit prêt et ait écrit le mot de passe temporaire
+                - sleep 10
+                # Récupérer le mot de passe root temporaire généré par MySQL au 1er démarrage
+                - TMPPASS=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}')
+                # Exécuter le script d'init avec ce mot de passe temporaire
+                - mysql --connect-expired-password -u root -p"$TMPPASS" < /tmp/init.sql
+                # Supprimer le script d'init (contient des mots de passe)
+                - rm -f /tmp/init.sql
+
+                # ---- Firewall firewalld (Fedora — pas ufw) ----
+                - systemctl enable firewalld
+                - systemctl start firewalld
+                # Autoriser SSH
+                - firewall-cmd --permanent --add-service=ssh
+                # Autoriser MySQL UNIQUEMENT depuis VM2 (192.168.100.10)
+                - firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.100.10" port protocol="tcp" port="3306" accept'
+                # Bloquer tout le reste par défaut
+                - firewall-cmd --set-default-zone=drop
+                - firewall-cmd --reload
+
+                - echo "VM3 Fedora 39 MySQL initialisee avec succes" >> /var/log/cloud-init-projet.log

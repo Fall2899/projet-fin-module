@@ -1,0 +1,131 @@
+# ============================================================
+# GitHub Actions — CI/CD déploiement complet sur OpenShift
+#
+# Ordre de déploiement (important) :
+#   1. Réseaux LAN + DMZ (NetworkAttachmentDefinition)
+#   2. VM1 pfSense       (VirtualMachine KubeVirt — FreeBSD)
+#   3. VM3 MySQL         (VirtualMachine KubeVirt — Fedora 39)
+#   4. VM2 Web           (Deployment conteneur — Nginx + Node.js)
+#
+# Secrets GitHub requis (Settings → Secrets → Actions) :
+#   OC_SERVER    : URL du cluster  ex: https://api.cluster.example.com:6443
+#   OC_TOKEN     : Token oc        ex: sha256~xxxxxxxxxxxx  (oc whoami -t)
+#   OC_NAMESPACE : projet-reseau
+# ============================================================
+name: Deploy to OpenShift
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:              # déclenchement manuel possible
+
+env:
+  NAMESPACE: ${{ secrets.OC_NAMESPACE }}
+
+jobs:
+  deploy:
+    name: Deploy infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer oc CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+
+      - name: Connexion à OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OC_SERVER }}
+          openshift_token:      ${{ secrets.OC_TOKEN }}
+          namespace:            ${{ secrets.OC_NAMESPACE }}
+          insecure_skip_tls_verify: true
+
+      # ── Étape 1 : Réseaux ──────────────────────────────────
+      - name: "[1/4] Réseaux — LAN + DMZ"
+        run: |
+          echo "==> Déploiement NetworkAttachmentDefinition LAN..."
+          oc apply -f reseau/nad-lan.yaml
+
+          echo "==> Déploiement NetworkAttachmentDefinition DMZ..."
+          oc apply -f reseau/nad-dmz.yaml
+
+          echo "Réseaux appliqués :"
+          oc get network-attachment-definitions -n $NAMESPACE
+
+      # ── Étape 2 : VM1 pfSense ──────────────────────────────
+      - name: "[2/4] VM1 — pfSense (VirtualMachine KubeVirt)"
+        run: |
+          echo "==> DataVolume pfSense..."
+          oc apply -f vm1-passerelle/vm1-pfsense-datavolume.yaml
+
+          echo "==> VirtualMachine pfSense..."
+          oc apply -f vm1-passerelle/vm1-pfsense.yaml
+
+          echo "==> Service + Route pfSense UI..."
+          oc apply -f vm1-passerelle/vm1-pfsense-service.yaml
+
+      # ── Étape 3 : VM3 MySQL Fedora ─────────────────────────
+      - name: "[3/4] VM3 — MySQL Fedora 39 (VirtualMachine KubeVirt)"
+        run: |
+          echo "==> DataVolume Fedora Cloud 39..."
+          oc apply -f vm3-db/vm3-datavolume.yaml
+
+          echo "==> VirtualMachine VM3 MySQL..."
+          oc apply -f vm3-db/vm3-db.yaml
+
+      # ── Étape 4 : VM2 conteneur ────────────────────────────
+      - name: "[4/4] VM2 — Nginx + Node.js (Deployment conteneur)"
+        run: |
+          echo "==> Deployment VM2 (ConfigMaps + Secret + Deployment)..."
+          oc apply -f vm2-web/vm2-deployment.yaml
+
+          echo "==> Service + Route VM2..."
+          oc apply -f vm2-web/vm2-service-route.yaml
+
+      - name: "[4/4] VM2 — Attendre que le pod soit Running"
+        run: |
+          oc rollout status deployment/vm2-web \
+            -n $NAMESPACE \
+            --timeout=120s
+
+      # ── Résumé ─────────────────────────────────────────────
+      - name: Résumé du déploiement
+        if: always()
+        run: |
+          echo ""
+          echo "════════════════════════════════════"
+          echo "         RÉSUMÉ DÉPLOIEMENT"
+          echo "════════════════════════════════════"
+
+          echo ""
+          echo "── VirtualMachines KubeVirt ──"
+          oc get vm -n $NAMESPACE 2>/dev/null || echo "Aucune VM"
+
+          echo ""
+          echo "── DataVolumes ──"
+          oc get datavolume -n $NAMESPACE 2>/dev/null || echo "Aucun DataVolume"
+
+          echo ""
+          echo "── Pods conteneurs (VM2) ──"
+          oc get pods -n $NAMESPACE -l app=vm2-web
+
+          echo ""
+          echo "── Routes exposées ──"
+          oc get routes -n $NAMESPACE
+
+          echo ""
+          echo "── URL publique VM2 ──"
+          URL=$(oc get route vm2-web-route -n $NAMESPACE \
+            -o jsonpath='https://{.spec.host}' 2>/dev/null)
+          echo "${URL:-Route pas encore disponible}"
+
+          echo ""
+          echo "── URL interface pfSense ──"
+          PF=$(oc get route vm1-pfsense-ui-route -n $NAMESPACE \
+            -o jsonpath='https://{.spec.host}' 2>/dev/null)
+          echo "${PF:-Route pas encore disponible}"

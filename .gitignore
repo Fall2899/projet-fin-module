@@ -1,24 +1,18 @@
-# Secrets et credentials — ne jamais committer
+# Secrets — ne jamais committer
 .env
 *.token
-secrets/
 kubeconfig
 *-secret.yaml
+secrets/
 
 # Logs
 *.log
-logs/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Editeurs
+# Éditeurs
 .vscode/
 .idea/
 *.swp
-*~
-
-# Temporaires
-*.tmp
-*.bak

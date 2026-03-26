@@ -1,7 +1,7 @@
 # ============================================================
 # NetworkAttachmentDefinition — Réseau LAN
-# Sous-réseau : 192.168.10.0/24
-# Utilisé par : VM1 (eth1) et VM3 (eth0)
+# Sous-réseau : 192.168.10.0/24  |  VLAN : 10
+# VMs connectées : VM1 (eth1, IP: 192.168.10.1) + VM3 (eth0, IP: 192.168.10.10)
 # ============================================================
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition

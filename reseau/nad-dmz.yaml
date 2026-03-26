@@ -1,7 +1,7 @@
 # ============================================================
 # NetworkAttachmentDefinition — Réseau DMZ
-# Sous-réseau : 192.168.100.0/24
-# Utilisé par : VM1 (eth2) et VM2 (eth0)
+# Sous-réseau : 192.168.100.0/24  |  VLAN : 100
+# VMs connectées : VM1 (eth2, IP: 192.168.100.1) + VM2 (pod, IP: 192.168.100.10)
 # ============================================================
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition

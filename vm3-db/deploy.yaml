@@ -1,8 +1,3 @@
-# ============================================================
-# GitHub Actions — Déploiement automatique sur OpenShift
-# VM1 + VM3 : VirtualMachine KubeVirt
-# VM2       : Deployment conteneur (Nginx + Node.js)
-# ============================================================
 name: Deploy to OpenShift
 
 on:
@@ -33,39 +28,44 @@ jobs:
           namespace: ${{ secrets.OC_NAMESPACE }}
           insecure_skip_tls_verify: true
 
-      - name: "[Réseau] Déployer LAN + DMZ"
+      - name: "[Réseau] LAN + DMZ"
         run: |
           oc apply -f reseau/nad-lan.yaml
           oc apply -f reseau/nad-dmz.yaml
 
-      - name: "[VM1] Déployer pfSense — VirtualMachine KubeVirt"
+      - name: "[VM1] pfSense — VirtualMachine KubeVirt"
         run: |
           oc apply -f vm1-passerelle/vm1-pfsense-datavolume.yaml
           oc apply -f vm1-passerelle/vm1-pfsense.yaml
           oc apply -f vm1-passerelle/vm1-pfsense-service.yaml
 
-      - name: "[VM2] Déployer Nginx + Node.js — Deployment conteneur"
+      - name: "[VM2] Nginx + Node.js — Deployment conteneur"
         run: |
           oc apply -f vm2-web/vm2-deployment.yaml
           oc apply -f vm2-web/vm2-service-route.yaml
 
-      - name: "[VM2] Attendre que le pod soit prêt"
+      - name: "[VM2] Attendre pod prêt"
         run: |
           oc rollout status deployment/vm2-web \
             -n ${{ secrets.OC_NAMESPACE }} \
             --timeout=120s
 
-      - name: "[VM3] Déployer MySQL — VirtualMachine KubeVirt"
+      - name: "[VM3] ConfigMap init.sql"
         run: |
-          oc apply -f vm3-db/vm3-db.yaml || echo "VM3 pas encore configurée — skip"
+          oc apply -f vm3-db/vm3-init-configmap.yaml
 
-      - name: Résumé du déploiement
+      - name: "[VM3] MySQL — VirtualMachine KubeVirt"
         run: |
-          echo "=== VirtualMachines KubeVirt ==="
-          oc get vm -n ${{ secrets.OC_NAMESPACE }} 2>/dev/null || echo "Aucune VM"
-          echo "=== Pods conteneurs ==="
+          oc apply -f vm3-db/vm3-datavolume.yaml
+          oc apply -f vm3-db/vm3-db.yaml
+
+      - name: Résumé déploiement
+        run: |
+          echo "=== VirtualMachines ==="
+          oc get vm -n ${{ secrets.OC_NAMESPACE }}
+          echo "=== Pods VM2 ==="
           oc get pods -n ${{ secrets.OC_NAMESPACE }} -l app=vm2-web
-          echo "=== Routes exposées ==="
+          echo "=== Routes ==="
           oc get routes -n ${{ secrets.OC_NAMESPACE }}
-          echo "=== URL publique VM2 ==="
+          echo "=== URL VM2 ==="
           oc get route vm2-web-route -n ${{ secrets.OC_NAMESPACE }} -o jsonpath='https://{.spec.host}'
