@@ -52,25 +52,6 @@ projet-fin-module/
     ├── vm3-db.yaml
     └── vm3-datavolume.yaml
 
-## Déploiement
-
-```bash
-# 1. Cloner
-git clone https://github.com/TON_USERNAME/projet-fin-module.git
-cd projet-fin-module
-
-# 2. Connexion OpenShift
-oc login --token=<TOKEN> --server=<URL_CLUSTER>
-oc new-project projet-reseau
-
-# 3. Déployer (ou laisser GitHub Actions le faire automatiquement)
-oc apply -f reseau/
-oc apply -f vm1-passerelle/
-oc apply -f vm3-db/
-oc apply -f vm2-web/
-oc rollout status deployment/vm2-web -n projet-reseau
-```
-
 ## Secret à modifier avant déploiement
 
 Dans `vm2-web/vm2-deployment.yaml` et `vm3-db/vm3-db.yaml`,
