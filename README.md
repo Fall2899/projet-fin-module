@@ -27,27 +27,30 @@ Internet
     |                 port 3306 (webuser uniquement)
 ```
 
-## Structure du dépôt
-
+## Structure du dépôT
+Le projet est maintenant complet avec **17 fichiers** :
 ```
 projet-fin-module/
-├── .github/workflows/deploy.yml   ← CI/CD complet GitHub Actions
-├── reseau/
-│   ├── nad-lan.yaml               ← LAN 192.168.10.0/24
-│   └── nad-dmz.yaml               ← DMZ 192.168.100.0/24
-├── vm1-passerelle/
-│   ├── vm1-pfsense.yaml           ← VirtualMachine pfSense
-│   ├── vm1-pfsense-datavolume.yaml
-│   └── vm1-pfsense-service.yaml   ← Route vers UI pfSense
-├── vm2-web/
-│   ├── vm2-deployment.yaml        ← Deployment Nginx + Node.js
-│   └── vm2-service-route.yaml     ← Route HTTPS publique
-├── vm3-db/
-│   ├── vm3-db.yaml                ← VirtualMachine Fedora 39 + MySQL
-│   └── vm3-datavolume.yaml        ← Image Fedora Cloud qcow2
+├── deploy-all.sh                         ← déploiement global
+├── .github/workflows/deploy.yml          ← CI/CD GitHub Actions
 ├── .gitignore
-└── README.md
-```
+├── README.md
+├── reseau/
+│   ├── nad-lan.yaml
+│   └── nad-dmz.yaml
+├── vm1-passerelle/
+│   ├── deploy-vm1.sh
+│   ├── vm1-pfsense.yaml
+│   ├── vm1-pfsense-datavolume.yaml
+│   └── vm1-pfsense-service.yaml
+├── vm2-web/
+│   ├── deploy-vm2.sh
+│   ├── vm2-deployment.yaml
+│   └── vm2-service-route.yaml
+└── vm3-db/
+    ├── deploy-vm3.sh
+    ├── vm3-db.yaml
+    └── vm3-datavolume.yaml
 
 ## Déploiement
 
