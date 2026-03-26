@@ -1,0 +1,24 @@
+# ============================================================
+# NetworkAttachmentDefinition — Réseau DMZ
+# Sous-réseau : 192.168.100.0/24
+# Utilisé par : VM1 (eth2) et VM2 (eth0)
+# ============================================================
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: dmz-network
+  namespace: projet-reseau
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: bridge.network.kubevirt.io/dmz-bridge
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "dmz-network",
+      "type": "cnv-bridge",
+      "bridge": "dmz-bridge",
+      "ipam": {
+        "type": "static"
+      },
+      "vlan": 100
+    }

@@ -1,0 +1,71 @@
+# ============================================================
+# GitHub Actions — Déploiement automatique sur OpenShift
+# VM1 + VM3 : VirtualMachine KubeVirt
+# VM2       : Deployment conteneur (Nginx + Node.js)
+# ============================================================
+name: Deploy to OpenShift
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy infrastructure to OpenShift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer oc CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+
+      - name: Connexion à OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OC_SERVER }}
+          openshift_token: ${{ secrets.OC_TOKEN }}
+          namespace: ${{ secrets.OC_NAMESPACE }}
+          insecure_skip_tls_verify: true
+
+      - name: "[Réseau] Déployer LAN + DMZ"
+        run: |
+          oc apply -f reseau/nad-lan.yaml
+          oc apply -f reseau/nad-dmz.yaml
+
+      - name: "[VM1] Déployer pfSense — VirtualMachine KubeVirt"
+        run: |
+          oc apply -f vm1-passerelle/vm1-pfsense-datavolume.yaml
+          oc apply -f vm1-passerelle/vm1-pfsense.yaml
+          oc apply -f vm1-passerelle/vm1-pfsense-service.yaml
+
+      - name: "[VM2] Déployer Nginx + Node.js — Deployment conteneur"
+        run: |
+          oc apply -f vm2-web/vm2-deployment.yaml
+          oc apply -f vm2-web/vm2-service-route.yaml
+
+      - name: "[VM2] Attendre que le pod soit prêt"
+        run: |
+          oc rollout status deployment/vm2-web \
+            -n ${{ secrets.OC_NAMESPACE }} \
+            --timeout=120s
+
+      - name: "[VM3] Déployer MySQL — VirtualMachine KubeVirt"
+        run: |
+          oc apply -f vm3-db/vm3-db.yaml || echo "VM3 pas encore configurée — skip"
+
+      - name: Résumé du déploiement
+        run: |
+          echo "=== VirtualMachines KubeVirt ==="
+          oc get vm -n ${{ secrets.OC_NAMESPACE }} 2>/dev/null || echo "Aucune VM"
+          echo "=== Pods conteneurs ==="
+          oc get pods -n ${{ secrets.OC_NAMESPACE }} -l app=vm2-web
+          echo "=== Routes exposées ==="
+          oc get routes -n ${{ secrets.OC_NAMESPACE }}
+          echo "=== URL publique VM2 ==="
+          oc get route vm2-web-route -n ${{ secrets.OC_NAMESPACE }} -o jsonpath='https://{.spec.host}'

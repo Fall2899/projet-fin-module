@@ -1,0 +1,25 @@
+# ============================================================
+# DataVolume — Disque pfSense pour VM1
+# Importe l'ISO pfSense depuis l'URL officielle
+# ============================================================
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: pfsense-dv
+  namespace: projet-reseau
+  labels:
+    app: vm1-pfsense
+spec:
+  source:
+    http:
+      # URL officielle pfSense CE 2.7.x (AMD64)
+      # Vérifie la dernière version sur https://www.pfsense.org/download/
+      url: "https://nyifiles.netgate.com/mirror/downloads/pfSense-CE-2.7.2-RELEASE-amd64.iso.gz"
+
+  pvc:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 20Gi             # 20 Go suffisants pour pfSense + logs
+    storageClassName: gp3-csi    # adapte selon le StorageClass disponible dans ton cluster

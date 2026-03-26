@@ -1,0 +1,42 @@
+# ============================================================
+# Service + Route — VM2 Serveur Web
+# Expose le conteneur Nginx vers l'extérieur du cluster
+# ============================================================
+
+# --- Service interne ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vm2-web-service
+  namespace: projet-reseau
+  labels:
+    app: vm2-web
+spec:
+  selector:
+    app: vm2-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+  type: ClusterIP
+
+---
+# --- Route OpenShift (équivalent Ingress) ---
+# Génère automatiquement une URL publique *.apps.<cluster>
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: vm2-web-route
+  namespace: projet-reseau
+  labels:
+    app: vm2-web
+spec:
+  to:
+    kind: Service
+    name: vm2-web-service
+  port:
+    targetPort: http
+  tls:
+    termination: edge              # HTTPS géré par OpenShift
+    insecureEdgeTerminationPolicy: Redirect

@@ -1,0 +1,61 @@
+# ============================================================
+# GitHub Actions — Déploiement automatique sur OpenShift
+# Déclenché à chaque push sur la branche main
+# Secrets requis : OC_SERVER, OC_TOKEN, OC_NAMESPACE
+# ============================================================
+name: Deploy to OpenShift
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:              # permet de lancer manuellement
+
+jobs:
+  deploy:
+    name: Deploy VMs to OpenShift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer oc CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+
+      - name: Connexion à OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OC_SERVER }}
+          openshift_token: ${{ secrets.OC_TOKEN }}
+          namespace: ${{ secrets.OC_NAMESPACE }}
+          insecure_skip_tls_verify: true
+
+      - name: Déployer les réseaux (LAN + DMZ)
+        run: |
+          oc apply -f reseau/nad-lan.yaml
+          oc apply -f reseau/nad-dmz.yaml
+
+      - name: Déployer VM1 — pfSense
+        run: |
+          oc apply -f vm1-passerelle/vm1-pfsense-datavolume.yaml
+          oc apply -f vm1-passerelle/vm1-pfsense.yaml
+          oc apply -f vm1-passerelle/vm1-pfsense-service.yaml
+
+      - name: Déployer VM2 — Serveur Web
+        run: |
+          oc apply -f vm2-web/vm2-web.yaml || echo "VM2 pas encore configurée"
+          oc apply -f vm2-web/vm2-service.yaml || echo "Service VM2 pas encore configuré"
+
+      - name: Déployer VM3 — Base de données
+        run: |
+          oc apply -f vm3-db/vm3-db.yaml || echo "VM3 pas encore configurée"
+
+      - name: Vérifier le statut des VMs
+        run: |
+          echo "=== Statut des VirtualMachines ==="
+          oc get vm -n ${{ secrets.OC_NAMESPACE }}
+          echo "=== Statut des DataVolumes ==="
+          oc get datavolume -n ${{ secrets.OC_NAMESPACE }}

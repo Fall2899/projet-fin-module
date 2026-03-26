@@ -1,0 +1,45 @@
+# ============================================================
+# Service — Accès à l'interface web pfSense (port 8443)
+# Permet d'accéder à la GUI pfSense depuis l'extérieur du cluster
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: vm1-pfsense-ui
+  namespace: projet-reseau
+  labels:
+    app: vm1-pfsense
+spec:
+  selector:
+    kubevirt.io/vm: vm1-pfsense
+  ports:
+    - name: pfsense-ui
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 443
+      protocol: TCP
+  type: ClusterIP
+---
+# Route OpenShift pour exposer l'UI pfSense en HTTPS
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: vm1-pfsense-ui-route
+  namespace: projet-reseau
+  labels:
+    app: vm1-pfsense
+spec:
+  to:
+    kind: Service
+    name: vm1-pfsense-ui
+  port:
+    targetPort: pfsense-ui
+  tls:
+    termination: passthrough       # pfSense gère son propre TLS

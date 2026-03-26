@@ -1,0 +1,262 @@
+# ============================================================
+# VM2 — Serveur Web (conteneur OpenShift)
+# Remplace la VirtualMachine par un Deployment standard
+# Services : Nginx (reverse proxy) + Node.js (application)
+# Réseau : DMZ 192.168.100.0/24
+# ============================================================
+
+# --- Namespace (si pas encore créé) ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: projet-reseau
+
+---
+# --- ConfigMap Nginx ---
+# Contient la configuration Nginx comme reverse proxy vers Node.js
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: projet-reseau
+data:
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        # Logs
+        access_log /var/log/nginx/access.log;
+        error_log  /var/log/nginx/error.log;
+
+        # Reverse proxy vers l'application Node.js
+        location / {
+            proxy_pass         http://localhost:3000;
+            proxy_http_version 1.1;
+            proxy_set_header   Upgrade $http_upgrade;
+            proxy_set_header   Connection 'upgrade';
+            proxy_set_header   Host $host;
+            proxy_set_header   X-Real-IP $remote_addr;
+            proxy_cache_bypass $http_upgrade;
+        }
+
+        # Healthcheck endpoint
+        location /health {
+            return 200 'OK';
+            add_header Content-Type text/plain;
+        }
+    }
+
+---
+# --- ConfigMap Application Node.js ---
+# Application Node.js simple qui se connecte à MySQL (VM3)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nodejs-app
+  namespace: projet-reseau
+data:
+  app.js: |
+    const http = require('http');
+    const mysql = require('mysql2/promise');
+
+    // Configuration base de données (VM3)
+    const dbConfig = {
+      host: process.env.DB_HOST || '192.168.10.10',
+      port: 3306,
+      user: process.env.DB_USER || 'webuser',
+      password: process.env.DB_PASSWORD || '',
+      database: process.env.DB_NAME || 'appdb',
+    };
+
+    // Serveur HTTP
+    const server = http.createServer(async (req, res) => {
+      if (req.url === '/health') {
+        res.writeHead(200);
+        res.end('OK');
+        return;
+      }
+
+      if (req.url === '/api/status') {
+        try {
+          const conn = await mysql.createConnection(dbConfig);
+          const [rows] = await conn.execute('SELECT 1 AS connected');
+          await conn.end();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'ok',
+            db: 'connected',
+            vm: 'VM2-conteneur',
+            timestamp: new Date().toISOString()
+          }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'error', db: err.message }));
+        }
+        return;
+      }
+
+      // Page d'accueil
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`
+        <html>
+          <body style="font-family:sans-serif;padding:40px">
+            <h1>Projet de fin de module</h1>
+            <p>Architecture 3-tiers sur OpenShift</p>
+            <ul>
+              <li>VM1 : pfSense (firewall) — VirtualMachine KubeVirt</li>
+              <li>VM2 : Nginx + Node.js (ce conteneur)</li>
+              <li>VM3 : MySQL (base de données) — VirtualMachine KubeVirt</li>
+            </ul>
+            <p><a href="/api/status">Tester la connexion base de données</a></p>
+          </body>
+        </html>
+      `);
+    });
+
+    server.listen(3000, () => {
+      console.log('Node.js app démarrée sur le port 3000');
+    });
+
+  package.json: |
+    {
+      "name": "projet-web-app",
+      "version": "1.0.0",
+      "main": "app.js",
+      "dependencies": {
+        "mysql2": "^3.6.0"
+      }
+    }
+
+---
+# --- Secret pour le mot de passe MySQL ---
+# En production : utilise un Secret Manager, pas un Secret en clair
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: projet-reseau
+type: Opaque
+stringData:
+  DB_HOST: "192.168.10.10"       # IP de VM3 sur le réseau LAN
+  DB_USER: "webuser"
+  DB_PASSWORD: "ChangeMe2024!"   # à changer avant déploiement
+  DB_NAME: "appdb"
+
+---
+# --- Deployment VM2 ---
+# Conteneur multi-service : Nginx (port 80) + Node.js (port 3000)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vm2-web
+  namespace: projet-reseau
+  labels:
+    app: vm2-web
+    role: web-server
+    projet: fin-de-module
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vm2-web
+  template:
+    metadata:
+      labels:
+        app: vm2-web
+    spec:
+      # Sécurité OpenShift : pas de root
+      securityContext:
+        runAsNonRoot: true
+
+      initContainers:
+        # Installe les dépendances Node.js au démarrage
+        - name: npm-install
+          image: node:18-alpine
+          command: ["sh", "-c", "cp /app-src/package.json /app && cd /app && npm install"]
+          volumeMounts:
+            - name: app-src
+              mountPath: /app-src
+            - name: app-runtime
+              mountPath: /app
+
+      containers:
+        # --- Conteneur Node.js ---
+        - name: nodejs
+          image: node:18-alpine
+          command: ["node", "/app/app.js"]
+          ports:
+            - containerPort: 3000
+              name: nodejs
+          envFrom:
+            - secretRef:
+                name: db-credentials
+          volumeMounts:
+            - name: app-src
+              mountPath: /app-src
+            - name: app-runtime
+              mountPath: /app
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+        # --- Conteneur Nginx ---
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: nginx.conf
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsUser: 101            # user nginx dans l'image alpine
+
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+        - name: app-src
+          configMap:
+            name: nodejs-app
+        - name: app-runtime
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}

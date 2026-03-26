@@ -1,0 +1,24 @@
+# Secrets et credentials — ne jamais committer
+.env
+*.token
+secrets/
+kubeconfig
+*-secret.yaml
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editeurs
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temporaires
+*.tmp
+*.bak

@@ -1,0 +1,107 @@
+# ============================================================
+# VM1 — Passerelle / Firewall pfSense
+# Plateforme : OpenShift Virtualization (KubeVirt)
+# Interfaces : WAN (NAT Internet) + LAN (192.168.10.0/24) + DMZ (192.168.100.0/24)
+# ============================================================
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: vm1-pfsense
+  namespace: projet-reseau          # adapte selon ton namespace OpenShift
+  labels:
+    app: vm1-pfsense
+    role: firewall-gateway
+    projet: fin-de-module
+spec:
+  running: true                     # démarre la VM automatiquement
+
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: vm1-pfsense
+    spec:
+      domain:
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        memory:
+          guest: 2Gi
+
+        devices:
+          # --- Disque principal pfSense ---
+          disks:
+            - name: pfsense-disk
+              bootOrder: 1
+              disk:
+                bus: virtio
+
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+
+          # --- Interfaces réseau (ordre important pour pfSense) ---
+          interfaces:
+            # eth0 — WAN : accès Internet via NAT OpenShift
+            - name: wan
+              bootOrder: 1
+              masquerade: {}        # NAT géré par OpenShift (accès Internet)
+              model: virtio
+              ports:
+                - name: http
+                  port: 80
+                  protocol: TCP
+                - name: https
+                  port: 443
+                  protocol: TCP
+                - name: pfsense-ui
+                  port: 8443
+                  protocol: TCP
+
+            # eth1 — LAN : réseau interne 192.168.10.0/24
+            - name: lan
+              bridge: {}
+              model: virtio
+
+            # eth2 — DMZ : zone démilitarisée 192.168.100.0/24
+            - name: dmz
+              bridge: {}
+              model: virtio
+
+        machine:
+          type: q35                 # type de machine recommandé pour pfSense
+
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: "2"
+
+      # --- Association des réseaux aux interfaces ---
+      networks:
+        # WAN : réseau pod par défaut (accès Internet via masquerade)
+        - name: wan
+          pod: {}
+
+        # LAN : réseau attaché via NetworkAttachmentDefinition
+        - name: lan
+          multus:
+            networkName: lan-network    # nom du NAD défini dans reseau/nad-lan.yaml
+
+        # DMZ : réseau attaché via NetworkAttachmentDefinition
+        - name: dmz
+          multus:
+            networkName: dmz-network    # nom du NAD défini dans reseau/nad-dmz.yaml
+
+      # --- Volumes ---
+      volumes:
+        - name: pfsense-disk
+          dataVolume:
+            name: pfsense-dv          # référence au DataVolume ci-dessous
+
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              # pfSense ne supporte pas cloud-init nativement
+              # Ce champ est conservé pour compatibilité
+              # La configuration pfSense se fait via son interface web
