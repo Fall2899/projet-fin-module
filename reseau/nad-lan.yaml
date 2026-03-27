@@ -7,7 +7,7 @@ apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   name: lan-network
-  namespace: projet-reseau
+  namespace: fall2899-dev
   annotations:
     k8s.v1.cni.cncf.io/resourceName: bridge.network.kubevirt.io/lan-bridge
 spec:
